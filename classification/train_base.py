@@ -407,10 +407,13 @@ def main():
 
     # init classifier
     model = MultiPartitioningClassifier(hparams=Namespace(**model_params))
+    logging.info("Model initialized!")
 
     logger = pl.loggers.TensorBoardLogger(save_dir=str(out_dir), name="tb_logs")
+    logging.info("Logger initialized!")
     checkpoint_dir = out_dir / "ckpts" / "{epoch:03d}-{val_loss:.4f}"
     checkpointer = pl.callbacks.model_checkpoint.ModelCheckpoint(checkpoint_dir)
+    logging.info("Checkpointer initialized!")
 
     progress_bar_refresh_rate = 0
     if args.progbar:
@@ -423,6 +426,7 @@ def main():
         checkpoint_callback=checkpointer,
         progress_bar_refresh_rate=progress_bar_refresh_rate,
     )
+    logging.info("Trainer initialized!")
 
     trainer.fit(model)
 

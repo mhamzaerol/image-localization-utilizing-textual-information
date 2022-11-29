@@ -180,8 +180,8 @@ class MsgPackIterableDatasetMultiTargetWithDynLabels(torch.utils.data.IterableDa
         while cache:
             yield self._process_sample(cache.pop())
 
-    def __len__(self):
-        return self.length
+    # def __len__(self):
+    #     return self.length
 
 
 class FiveCropImageDataset(torch.utils.data.Dataset):

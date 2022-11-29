@@ -14,36 +14,40 @@ import pandas as pd
 import PIL
 from PIL import ImageFile
 
+from tqdm import *
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 class MsgPackWriter:
-    def __init__(self, path, chunk_size=4096):
+    def __init__(self, path, id, chunk_size=4096):
         self.path = Path(path).absolute()
         self.path.mkdir(parents=True, exist_ok=True)
         self.chunk_size = chunk_size
+        self.id = id
 
-        shards_re = r"shard_(\d+).msg"
-        self.shards_index = [
-            int(re.match(shards_re, x).group(1))
-            for x in self.path.iterdir()
-            if x.is_dir() and re.match(shards_re, x)
-        ]
+        # shards_re = r"shard_(\d+).msg"
+        # self.shards_index = [
+        #     int(re.match(shards_re, x).group(1))
+        #     for x in self.path.iterdir()
+        #     if x.is_dir() and re.match(shards_re, x)
+        # ]
         self.shard_open = None
+        self.cur_idx = -1
 
     def open_next(self):
-        if len(self.shards_index) == 0:
-            next_index = 0
-        else:
-            next_index = sorted(self.shards_index)[-1] + 1
-        self.shards_index.append(next_index)
+        # if len(self.shards_index) == 0:
+        #     next_index = 0
+        # else:
+        #     next_index = sorted(self.shards_index)[-1] + 1
+        # self.shards_index.append(next_index)
 
         if self.shard_open is not None and not self.shard_open.closed:
             self.shard_open.close()
 
+        self.cur_idx += 1
         self.count = 0
-        self.shard_open = open(self.path / f"shard_{next_index}.msg", "wb")
+        self.shard_open = open(self.path / f"shard_{self.id}-{self.cur_idx}.msg", "wb")
 
     def __enter__(self):
         self.open_next()
@@ -69,11 +73,11 @@ def _thumbnail(img: PIL.Image, size: int) -> PIL.Image:
     if w < h:
         ow = size
         oh = int(size * h / w)
-        return img.resize((ow, oh), PIL.Image.BILINEAR)
+        return img.resize((ow, oh), PIL.Image.Resampling.BILINEAR)
     else:
         oh = size
         ow = int(size * w / h)
-        return img.resize((ow, oh), PIL.Image.BILINEAR)
+        return img.resize((ow, oh), PIL.Image.Resampling.BILINEAR)
 
 
 def flickr_download(x, size_suffix="z", min_edge_size=None):
@@ -91,7 +95,18 @@ def flickr_download(x, size_suffix="z", min_edge_size=None):
     else:
         url = url_original
 
-    r = requests.get(url)
+    cnt_trial = 10
+    while True:
+        try:
+            r = requests.get(url)
+            break
+        except:
+            logger.error(f"error while requesting")
+            cnt_trial -= 1
+            if cnt_trial == 0:
+                return None
+            continue 
+
     if r:
         try:
             image = PIL.Image.open(BytesIO(r.content))
@@ -101,7 +116,7 @@ def flickr_download(x, size_suffix="z", min_edge_size=None):
     elif r.status_code == 129:
         time.sleep(60)
         logger.warning("To many requests, sleep for 60s...")
-        flickr_download(x, min_edge_size=min_edge_size, size_suffix=size_suffix)
+        return flickr_download(x, min_edge_size=min_edge_size, size_suffix=size_suffix)
     else:
         logger.error(f"{image_id} : {url}: {r.status_code}")
         return None
@@ -120,7 +135,7 @@ def flickr_download(x, size_suffix="z", min_edge_size=None):
 
 
 class ImageDataloader:
-    def __init__(self, url_csv: Path, shuffle=False, nrows=None):
+    def __init__(self, url_csv: Path, shuffle=False, nrows=None, lr_range=None):
 
         logger.info("Read dataset")
         self.df = pd.read_csv(
@@ -130,7 +145,10 @@ class ImageDataloader:
         self.df = self.df.dropna()
         if shuffle:
             logger.info("Shuffle images")
-            self.df = self.df.sample(frac=1, random_state=10)
+            self.df = self.df.sample(frac=1, random_state=32)
+        if lr_range:
+            l, r = list(map(int, lr_range.split('-')))
+            self.df = self.df.iloc[l:r]
         logger.info(f"Number of URLs: {len(self.df.index)}")
 
     def __len__(self):
@@ -173,6 +191,16 @@ def parse_args():
         default="z",
         help="Image size suffix according to the Flickr API; Empty string for original image",
     )
+    args.add_argument(
+        "--lr_range",
+        type=str,
+        default=None,
+    )
+    args.add_argument(
+        "--idx",
+        type=int,
+        default=0,
+    )
     args.add_argument("--nrows", type=int)
     args.add_argument(
         "--shuffle", action="store_true", help="Shuffle list of URLs before downloading"
@@ -182,32 +210,37 @@ def parse_args():
 
 def main():
 
-    image_loader = ImageDataloader(args.url_csv, nrows=args.nrows, shuffle=args.shuffle)
+    if args.lr_range is not None:
+        image_loader = ImageDataloader(args.url_csv, lr_range=args.lr_range)
+    else:
+        image_loader = ImageDataloader(args.url_csv, nrows=args.nrows, shuffle=args.shuffle)
 
     counter_successful = 0
     with Pool(args.threads) as p:
-        with MsgPackWriter(args.output) as f:
-            start = time.time()
-            for i, x in enumerate(
-                p.imap(
-                    partial(
-                        flickr_download,
-                        size_suffix=args.size_suffix,
-                        min_edge_size=args.size,
-                    ),
-                    image_loader,
-                )
-            ):
-                if x is None:
-                    continue
+        with tqdm(total=len(image_loader)) as pbar:
+            with MsgPackWriter(args.output, args.idx) as f:
+                start = time.time()
+                for i, x in enumerate(
+                    p.imap(
+                        partial(
+                            flickr_download,
+                            size_suffix=args.size_suffix,
+                            min_edge_size=args.size,
+                        ),
+                        image_loader,
+                    )
+                ):
+                    pbar.update()
+                    if x is None:
+                        continue
 
-                f.write(x)
-                counter_successful += 1
+                    f.write(x)
+                    counter_successful += 1
 
-                if i % 1000 == 0:
-                    end = time.time()
-                    logger.info(f"{i}: {1000 / (end - start):.2f} image/s")
-                    start = end
+                    if i % 1000 == 0:
+                        end = time.time()
+                        logger.info(f"{i}: {1000 / (end - start):.2f} image/s")
+                        start = end
     logger.info(
         f"Sucesfully downloaded {counter_successful}/{len(image_loader)} images ({counter_successful / len(image_loader):.3f})"
     )
