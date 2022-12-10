@@ -288,7 +288,7 @@ class MultiPartitioningClassifier(pl.LightningModule):
 
     def test_step(self, batch, batch_idx, dataloader_idx=None):
 
-        yhats, true_lats, true_lngs,, hierarchy_preds = self._main_inference(batch)
+        yhats, true_lats, true_lngs, hierarchy_preds = self._main_inference(batch)
 
         distances_dict = {}
         if self.hierarchy is not None:
