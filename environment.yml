@@ -1,4 +1,4 @@
-name: geoestimation-github-pytorch
+name: geoOCR
 channels:
   - pytorch
   - conda-forge
