@@ -7,11 +7,14 @@ import multiprocessing
 import torchvision
 import json
 from pathlib import Path
+import argparse
+import yaml
 
 from train_dataset import StreetViewDataset
 
 def parse_args():
     
+    parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--config", type=Path, required=True, help="Path to the config file")
     
     args = parser.parse_args()
@@ -42,7 +45,7 @@ def main():
         config = yaml.load(f, Loader=yaml.FullLoader)
 
     lang_list = []
-    with open("lang_list.txt", "r") as f:
+    with open("easy-ocr/lang_list.txt", "r") as f:
         for line in f:
             lang_list.append(line.strip())
     print(f"Total of {len(lang_list)} languages")
@@ -64,7 +67,7 @@ def main():
         for i in range(len(img_paths)):
             key = img_paths[i].split("/")[-1]
             id_json[key] = i
-        with open(config[f"{dataset_var}_ocr_json_path"], "w") as f:
+        with open(config["ocr_params"][f"{dataset_var}_ocr_json_path"], "w") as f:
             json.dump(id_json, f, indent=4)
 
         idxs = []
@@ -81,11 +84,11 @@ def main():
 
             feats = np.expand_dims(np.concatenate(feats), 1)
             all_feats.append(feats)
-            np.save(config[f"{dataset_var}_ocr_feat_path"], np.concatenate(all_feats, 1))
+            np.save(config["ocr_params"][f"{dataset_var}_ocr_feat_path"], np.concatenate(all_feats, 1))
         
         all_feats = np.concatenate(all_feats, 1)
         print(all_feats.shape)
-        np.save(config[f"{dataset_var}_ocr_feat_path"], all_feats)
+        np.save(config["ocr_params"][f"{dataset_var}_ocr_feat_path"], all_feats)
 
 
 if __name__ == "__main__":

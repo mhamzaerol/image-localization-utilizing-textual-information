@@ -102,6 +102,7 @@ Available argparse paramters:
 The resulting file will be saved under the same directory as of the checkpoint file. 
 
 ### Training from Scratch
+#### Train from scratch by using the current dataset
 If you did not run the commands for the inference step, run them:
 ```
 wget https://github.com/mhamzaerol/image-localization-utilizing-textual-information/releases/download/files/test_streetview_labels.json -O resources/test_streetview_labels.json
@@ -126,6 +127,22 @@ Train ``GeoOCR finetune`` from scratch by referring to the config corresponding 
 python -m classification.train_base --config config/ocr-finetune.yml --progbar 
 ```
 The log files (loss/accuracy/checkpoints) will be populated under the ``data/experiments/`` directory.
+
+#### Train from scratch by using an arbitrary dataset
+Assuming you have a dataset (split into train and test) different than what is being used here. To train everything from scratch in this case, run the following commands. Here, we are assuming that you somehow placed the train and test datasets under the directory ``resources/images/test_streetview`` and ``resources/images/train_streetview``. Moreover, we are also assuming that the names of the images are the latitude,longitude coordinates of the locations the images were taken in. The name format should be "lat,lng.png" for an image. 
+Firstly, based on the training set, we will create the partitionings. The characteristics of the partitionings will be determined by the config file provided as an input. Then, we will assign each of the images of the dataset (test/train) a label (namely a class index). 
+```
+python partitioning/create_cells.py --config=config/ocr-finetune.yml
+python partitioning/assign_classes.py --config=config/ocr-finetune.yml
+```
+Then extract the OCR features:
+```
+python easy-ocr/main.py --config=config/ocr-finetune.yml
+```
+Then do the training:
+```
+python -m classification.train_base --config config/ocr-finetune.yml --progbar 
+```
 
 ### Concluding remarks
 - You can run the following train/test/inference commands for other models by changing the directories/config file names etc. appropriately.

@@ -12,6 +12,7 @@ import pandas as pd
 import s2sphere as s2
 
 from pathlib import Path
+import yaml
 
 
 def parse_args():
@@ -120,8 +121,8 @@ def create_cell_at_level(cell, level):
 
 def write_output(img_container, h, out_dir):
 
-    if not os.path.exists(out_p):
-        os.makedirs(out_p)
+    if not os.path.exists(out_dir.parent):
+        os.makedirs(out_p.parent)
 
     logging.info(f"Write to {out_dir}")
     with open(out_dir, "w") as f:

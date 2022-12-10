@@ -1,7 +1,7 @@
 out_dir: data/experiments/noocr-finetune/
 model_params:
   arch: resnet50 # model architecture from torchvision namespace
-  weights: /root/reproduce/GeoEstimation/models/base_M/epoch=014-val_loss=18.4833.ckpt 
+  weights: models/base_M/epoch=014-val_loss=18.4833.ckpt 
   frozen: false
   ocr_params:
     use_ocr: false
@@ -9,10 +9,10 @@ model_params:
       in_size: 60
       hidden_size: 64
       out_size: 64
-    val_ocr_json_path: /root/reproduce/GeoEstimation/resources/test_feat_id.json
-    train_ocr_json_path: /root/reproduce/GeoEstimation/resources/train_feat_id.json
-    val_ocr_feat_path: /root/reproduce/GeoEstimation/resources/test_ocr_feats_final.npy
-    train_ocr_feat_path: /root/reproduce/GeoEstimation/resources/train_ocr_feats_final.npy
+    val_ocr_json_path: resources/test_feat_id.json
+    train_ocr_json_path: resources/train_feat_id.json
+    val_ocr_feat_path: resources/test_ocr_feats_final.npy
+    train_ocr_feat_path: resources/train_ocr_feats_final.npy
   classifier_hidden_size: 2048
   batch_size: 256
   val_check_interval: 4 # validate after x steps (batches) i.e. batch_size*val_check_interval = n images
