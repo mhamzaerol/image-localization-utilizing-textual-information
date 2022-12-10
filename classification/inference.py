@@ -6,7 +6,8 @@ import torch
 from tqdm.auto import tqdm
 
 from classification.train_base import MultiPartitioningClassifier
-from classification.dataset import FiveCropImageDataset
+import torchvision
+from classification.dataset import StreetViewDataset
 
 
 def parse_args():
@@ -48,22 +49,50 @@ def parse_args():
 args = parse_args()
 
 print("Load model from ", args.checkpoint)
+
 model = MultiPartitioningClassifier.load_from_checkpoint(
     checkpoint_path=str(args.checkpoint),
     hparams_file=str(args.hparams),
     map_location=None,
 )
+
+hparams = model.hparams
+
 model.eval()
 if args.gpu and torch.cuda.is_available():
     model.cuda()
 
 print("Init dataloader")
-dataloader = torch.utils.data.DataLoader(
-    FiveCropImageDataset(meta_csv=None, image_dir=args.image_dir),
-    batch_size=ceil(args.batch_size / 5),
-    shuffle=False,
-    num_workers=args.num_workers,
+
+tfm = torchvision.transforms.Compose(
+    [
+        torchvision.transforms.Resize(256),
+        torchvision.transforms.CenterCrop(224),
+        torchvision.transforms.ToTensor(),
+        torchvision.transforms.Normalize(
+            (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
+        ),
+    ]
 )
+
+dataset = StreetViewDataset(
+    data_path=hparams.val_dir,
+    ocr_json_path=hparams.ocr_params['val_ocr_json_path'],
+    ocr_feat_path=hparams.ocr_params['val_ocr_feat_path'],
+    label_path=hparams.val_label_mapping,
+    use_ocr=hparams.ocr_params['use_ocr'],
+    shuffle=False,
+    transformation=tfm,
+    give_latlng=True,
+)
+
+dataloader = torch.utils.data.DataLoader(
+    dataset,
+    batch_size=hparams.batch_size,
+    num_workers=hparams.num_workers_per_loader,
+    pin_memory=True,
+)
+
 print("Number of images: ", len(dataloader.dataset))
 if len(dataloader.dataset) == 0:
     raise RuntimeError(f"No images found in {args.image_dir}")
@@ -72,17 +101,17 @@ rows = []
 for X in tqdm(dataloader):
     if args.gpu:
         X[0] = X[0].cuda()
-    img_paths, pred_classes, pred_latitudes, pred_longitudes = model.inference(X)
+    true_coords, pred_classes, pred_latitudes, pred_longitudes = model.inference(X)
     for p_key in pred_classes.keys():
-        for img_path, pred_class, pred_lat, pred_lng in zip(
-            img_paths,
+        for true_coord, pred_class, pred_lat, pred_lng in zip(
+            true_coords,
             pred_classes[p_key].cpu().numpy(),
             pred_latitudes[p_key].cpu().numpy(),
             pred_longitudes[p_key].cpu().numpy(),
         ):
             rows.append(
                 {
-                    "img_id": Path(img_path).stem,
+                    "coords": f'{true_coord[0]},{true_coord[1]}',
                     "p_key": p_key,
                     "pred_class": pred_class,
                     "pred_lat": pred_lat,
@@ -90,7 +119,7 @@ for X in tqdm(dataloader):
                 }
             )
 df = pd.DataFrame.from_records(rows)
-df.set_index(keys=["img_id", "p_key"], inplace=True)
+df.set_index(keys=["coords", "p_key"], inplace=True)
 print(df)
 fout = Path(args.checkpoint).parent / f"inference_{args.image_dir.stem}.csv"
 print("Write output to", fout)

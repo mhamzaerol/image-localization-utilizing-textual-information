@@ -43,7 +43,6 @@ def build_base_model(arch: str):
     model.flatten = torch.nn.Flatten(start_dim=1)
     return model, nfeatures
 
-
 def load_weights_if_available(
     model: torch.nn.Module, classifier: torch.nn.Module, weights_path: Union[str, Path]
 ):
@@ -59,7 +58,10 @@ def load_weights_if_available(
             state_dict_classifier[k.replace("classifier.", "")] = w
         else:
             logging.warning(f"Unexpected prefix in state_dict: {k}")
-    model.load_state_dict(state_dict_features, strict=True)
+    if model is not None:
+        model.load_state_dict(state_dict_features, strict=True)
+    if classifier is not None:
+        classifier.load_state_dict(state_dict_classifier, strict=True)
     return model, classifier
 
 

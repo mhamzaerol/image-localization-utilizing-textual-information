@@ -11,13 +11,13 @@ from collections import Counter
 import pandas as pd
 import s2sphere as s2
 
+from pathlib import Path
+
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Create Cell Partitioning")
-    parser.add_argument("-v", "--verbose", action="store_true", help="verbose output")
-
+    parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--dataset", type=str, required=True, help="Path to dataset csv file"
+        "--config", type=str, required=True, help="Path to config"
     )
     parser.add_argument(
         "-ci",
@@ -31,23 +31,6 @@ def parse_args():
     )
     parser.add_argument(
         "-clng", "--column_lng", type=str, default="LON", help="column name longitude"
-    )
-
-    parser.add_argument(
-        "--output", type=str, required=False, help="Path to output directory"
-    )
-
-    parser.add_argument(
-        "--img_min",
-        type=int,
-        required=True,
-        help="Minimum number of images per geographical cell",
-    )
-    parser.add_argument(
-        "--img_max",
-        type=int,
-        required=True,
-        help="Maximum number of images per geographical cell",
     )
 
     parser.add_argument(
@@ -135,14 +118,13 @@ def create_cell_at_level(cell, level):
     return hexid
 
 
-def write_output(args, img_container, h, num_images, out_p):
+def write_output(img_container, h, out_dir):
 
     if not os.path.exists(out_p):
         os.makedirs(out_p)
 
-    fname = f"cells_{args.img_min}_{args.img_max}_images_{num_images}.csv"
-    logging.info(f"Write to {os.path.join(out_p, fname)}")
-    with open(os.path.join(out_p, fname), "w") as f:
+    logging.info(f"Write to {out_dir}")
+    with open(out_dir, "w") as f:
         cells_writer = csv.writer(f, delimiter=",")
         # write column names
         cells_writer.writerow(
@@ -177,13 +159,23 @@ def write_output(args, img_container, h, num_images, out_p):
                 [cell2class[k], k, v, coords_sum[k][0] / v, coords_sum[k][1] / v]
             )
 
+def read_dataset(dataset_path):
+    # get the names in the directory
+    img_names = os.listdir(dataset_path)
+    img_names = [x for x in img_names if x.endswith((".jpg", ".png"))]
+    img_names_latlng = [(x, '.'.join(x.split('.')[:-1])) for x in img_names]
+    img_names_latlng = [(x[0], *(x[1].split(','))) for x in img_names_latlng]
+    img_names_latlng = [x for x in img_names_latlng if len(x) == 3] # remove it later
+    img_names_latlng = [(x[0], float(x[1]), float(x[2])) for x in img_names_latlng]
+    # make a data frame with columns: IMG_ID, LAT, LON
+    df = pd.DataFrame(img_names_latlng, columns=["IMG_ID", "LAT", "LON"])
+    return df
+
 
 def main():
     # load arguments
     args = parse_args()
     level = logging.INFO
-    if args.verbose:
-        level = logging.DEBUG
 
     logging.basicConfig(
         format="%(asctime)s %(levelname)s: %(message)s",
@@ -191,46 +183,59 @@ def main():
         level=level,
     )
 
-    # read dataset
-    df = pd.read_csv(
-        args.dataset, usecols=[args.column_img_path, args.column_lat, args.column_lng]
-    )
-    img_container = list(df.itertuples(index=False, name=None))
-    num_images = len(img_container)
-    logging.info("{} images available.".format(num_images))
-    level = args.lvl_min
+    with open(args.config) as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+
+    config = config["model_params"]
+
+    output_files = config["partitionings"]["files"]
+    output_dir = Path(output_files[0]).parent
 
     # create output directory
-    if not os.path.exists(args.output):
-        os.makedirs(args.output)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-    # initialize
-    logging.info("Initialize cells of level {} ...".format(level))
-    start = time()
-    img_container, h = init_cells(img_container, level)
-    logging.info(f"Time: {time() - start:.2f}s - Number of classes: {len(h)}")
+    for i in range(3):
+        
+        logging.info(f"Running {i}th partitioning ...")
+        filename = output_files[i].split("/")[-1]
+        _, img_min, img_max, __ = filename.split("_")
+        img_min, img_max = int(img_min), int(img_max)
 
-    logging.info("Remove cells with |img| < t_min ...")
-    start = time()
-    img_container, h = delete_cells(img_container, h, args.img_min)
-    logging.info(f"Time: {time() - start:.2f}s - Number of classes: {len(h)}")
+        # read dataset
+        df = read_dataset(config["train_dir"])
+        img_container = list(df.itertuples(index=False, name=None))
+        num_images = len(img_container)
+        logging.info("{} images available.".format(num_images))
+        level = args.lvl_min
 
-    logging.info("Create subcells ...")
-    while any(v > args.img_max for v in h.values()) and level < args.lvl_max:
-        level = level + 1
-        logging.info("Level {}".format(level))
+        # initialize
+        logging.info("Initialize cells of level {} ...".format(level))
         start = time()
-        img_container, h = gen_subcells(img_container, h, level, args.img_max)
+        img_container, h = init_cells(img_container, level)
         logging.info(f"Time: {time() - start:.2f}s - Number of classes: {len(h)}")
 
-    logging.info("Remove cells with |img| < t_min ...")
-    start = time()
-    img_container, h = delete_cells(img_container, h, args.img_min)
-    logging.info(f"Time: {time() - start:.2f}s - Number of classes: {len(h)}")
-    logging.info(f"Number of images: {len(img_container)}")
+        logging.info("Remove cells with |img| < t_min ...")
+        start = time()
+        img_container, h = delete_cells(img_container, h, img_min)
+        logging.info(f"Time: {time() - start:.2f}s - Number of classes: {len(h)}")
 
-    logging.info("Write output file ...")
-    write_output(args, img_container, h, num_images, args.output)
+        logging.info("Create subcells ...")
+        while any(v > img_max for v in h.values()) and level < args.lvl_max:
+            level = level + 1
+            logging.info("Level {}".format(level))
+            start = time()
+            img_container, h = gen_subcells(img_container, h, level, img_max)
+            logging.info(f"Time: {time() - start:.2f}s - Number of classes: {len(h)}")
+
+        logging.info("Remove cells with |img| < t_min ...")
+        start = time()
+        img_container, h = delete_cells(img_container, h, img_min)
+        logging.info(f"Time: {time() - start:.2f}s - Number of classes: {len(h)}")
+        logging.info(f"Number of images: {len(img_container)}")
+
+        logging.info("Write output file ...")
+        write_output(img_container, h, Path(output_files[i]))
 
 
 if __name__ == "__main__":

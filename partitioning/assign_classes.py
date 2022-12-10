@@ -7,6 +7,7 @@ from typing import Union
 import pandas as pd
 import s2sphere as s2
 from tqdm import tqdm
+import os
 
 tqdm.pandas()
 
@@ -15,21 +16,6 @@ def create_s2_cell(latlng):
     p1 = s2.LatLng.from_degrees(latlng["lat"], latlng["lng"])
     cell = s2.Cell.from_lat_lng(p1)
     return cell
-
-
-def get_id_s2cell_mapping_from_raw(
-    csv_file, col_img_id, col_lat, col_lng
-) -> pd.DataFrame:
-
-    usecols = [col_img_id, col_lat, col_lng]
-    df = pd.read_csv(csv_file, usecols=usecols)
-    df = df.rename(columns={k: v for k, v in zip(usecols, ["img_path", "lat", "lng"])})
-
-    logging.info("Initialize s2 cells...")
-    df["s2cell"] = df[["lat", "lng"]].progress_apply(create_s2_cell, axis=1)
-    df = df.set_index(df["img_path"])
-    return df[["s2cell"]]
-
 
 def assign_class_index(cell: s2.Cell, mapping: dict) -> Union[int, None]:
 
@@ -44,7 +30,7 @@ def assign_class_index(cell: s2.Cell, mapping: dict) -> Union[int, None]:
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-c", "--config", type=Path, default="config/baseM.yml")
+    parser.add_argument("-c", "--config", type=Path, required=True, help="Path to the config file")
     parser.add_argument(
         "-ci",
         "--column_img_path",
@@ -57,13 +43,6 @@ def parse_args():
     )
     parser.add_argument(
         "-clng", "--column_lng", type=str, default="LON", help="Column name longitude"
-    )
-    parser.add_argument(
-        "-pskip",
-        "--skiprows",
-        type=int,
-        default=2,
-        help="skip first n rows for each partitioning",
     )
     args = parser.parse_args()
     return args
@@ -84,34 +63,45 @@ if __name__ == "__main__":
     )
 
     config = config["model_params"]
-    for dataset_type in ["val", "train"]:
-        label_mapping_file = config[f"{dataset_type}_meta_path"]
-        output_file = config[f"{dataset_type}_label_mapping"]
-        logging.info(label_mapping_file)
+    
+    for dataset_type in ["test", "train"]:
+    
+        if dataset_type == "test":
+            dataset_var = "val"
+        else:
+            dataset_var = dataset_type
+
+        output_file = config[f"{dataset_var}_label_mapping"]
         logging.info(output_file)
         output_file = Path(output_file)
         output_file.parent.mkdir(exist_ok=True, parents=True)
 
-        logging.info("Load CSV and initialize s2 cells")
-        logging.info(f"Column image path: {args.column_img_path}")
-        logging.info(f"Column latitude: {args.column_lat}")
-        logging.info(f"Column longitude: {args.column_lng}")
-        df_mapping = get_id_s2cell_mapping_from_raw(
-            label_mapping_file,
-            col_img_id=args.column_img_path,
-            col_lat=args.column_lat,
-            col_lng=args.column_lng,
-        )
+        logging.info("Traverse images and assign class index")
+
+        # get the images in the dir
+        img_names = os.listdir(config[f"{dataset_var}_dir"])
+        img_names = [x for x in img_names if x.endswith((".jpg", ".png"))]
+        img_names_latlng = [(x, '.'.join(x.split('.')[:-1])) for x in img_names]
+        img_names_latlng = [(x[0], *(x[1].split(','))) for x in img_names_latlng]
+        img_names_latlng = [x for x in img_names_latlng if len(x) == 3] # remove it later
+        img_names_latlng = [(x[0], float(x[1]), float(x[2])) for x in img_names_latlng]
+
+        df_mapping = pd.DataFrame(img_names_latlng, columns=['img_path', 'lat', 'lng'])
+
+        logging.info("Initialize s2 cells...")
+        df_mapping["s2cell"] = df_mapping[["lat", "lng"]].progress_apply(create_s2_cell, axis=1)
+        df_mapping = df_mapping.set_index(df_mapping["img_path"])
 
         partitioning_files = [Path(p) for p in config["partitionings"]["files"]]
         for partitioning_file in partitioning_files:
             column_name = partitioning_file.name.split(".")[0]
+            print(partitioning_file)
             logging.info(f"Processing partitioning: {column_name}")
+            
             partitioning = pd.read_csv(
                 partitioning_file,
                 encoding="utf-8",
                 index_col="hex_id",
-                skiprows=args.skiprows,
             )
 
             # create column with class indexes for respective partitioning

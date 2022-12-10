@@ -20,38 +20,27 @@ import numpy as np
 class StreetViewDataset(Dataset):
     def __init__(
         self,
-        data_path,
-        ocr_json_path,
-        ocr_feat_path,
-        label_path,
+        data_path = "/root/dataset-streetview/",
+        ocr_json_path = "/root/easy-ocr/feat_id.json",
+        ocr_feat_path = "/root/easy-ocr/ocr_feats_final.npy",
+        label_path = "/root/reproduce/GeoEstimation/resources/streetview_labels.json",
         use_ocr = True,
         transformation = None,
         give_latlng = False,
-        shuffle = True,
     ):
         super(StreetViewDataset, self).__init__()
         root = Path(data_path)
         self.use_ocr = use_ocr
-
-        with open(label_path, "r") as label_json:
-            self.label_map = json.load(label_json)
-
         self.img_paths = list(root.glob("*.png"))
-        self.img_paths = [x for x in self.img_paths if x.name in self.label_map] # check the existence of the img name
-
-        self.shuffle = shuffle
-        if self.shuffle:
-            random.shuffle(self.img_paths)
-
         self.img_names = [x.name for x in self.img_paths]
         self.latlngs = [np.array([float(x.stem.split(",")[0]), float(x.stem.split(",")[1])]) for x in self.img_paths]
         self.transformation = transformation
-        if self.use_ocr:
-            with open(ocr_json_path, "r") as ocr_json:
-                self.ocr_index_map = json.load(ocr_json)
-            self.ocr_features = np.load(ocr_feat_path)
+        with open(ocr_json_path, "r") as ocr_json:
+            self.ocr_index_map = json.load(ocr_json)
+        with open(label_path, "r") as label_json:
+            self.label_map = json.load(label_json)
+        self.ocr_features = np.load(ocr_feat_path)
         self.give_latlng = give_latlng
-
 
     def __len__(self):
         return len(self.img_paths)
@@ -68,17 +57,16 @@ class StreetViewDataset(Dataset):
         if self.transformation is not None:
             img = self.transformation(img)
 
-        # ocr features will be an empty tensor
-        ocr_features = torch.empty(0)
+        ocr_features = None
 
         if self.use_ocr:
             ocr_feat_index = self.ocr_index_map[str(self.img_names[idx])]
-            ocr_features = self.ocr_features[ocr_feat_index].astype(np.float32) # it was throwing error for "double" type
+            ocr_features = self.ocr_features[ocr_feat_index]
 
-        if self.give_latlng:
-            return img, ocr_features, self.label_map[self.img_names[idx]], *self.latlngs[idx]
+        if give_latlng:
+            return img, ocr_features, self.labels[idx], *self.latlngs[idx]
 
-        return img, ocr_features, self.label_map[self.img_names[idx]]
+        return img, ocr_features, self.labels[idx]
 
 
 if __name__ == "__main__":

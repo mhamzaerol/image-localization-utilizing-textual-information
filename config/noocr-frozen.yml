@@ -1,0 +1,48 @@
+out_dir: data/experiments/noocr-frozen/
+model_params:
+  arch: resnet50 # model architecture from torchvision namespace
+  weights: /root/reproduce/GeoEstimation/models/base_M/epoch=014-val_loss=18.4833.ckpt
+  frozen: true
+  ocr_params:
+    use_ocr: false
+    ocr_encoder_params:
+      in_size: 60
+      hidden_size: 64
+      out_size: 64
+    val_ocr_json_path: /root/reproduce/GeoEstimation/resources/test_feat_id.json
+    train_ocr_json_path: /root/reproduce/GeoEstimation/resources/train_feat_id.json
+    val_ocr_feat_path: /root/reproduce/GeoEstimation/resources/test_ocr_feats_final.npy
+    train_ocr_feat_path: /root/reproduce/GeoEstimation/resources/train_ocr_feats_final.npy
+  classifier_hidden_size: 2048
+  batch_size: 256
+  val_check_interval: 4 # validate after x steps (batches) i.e. batch_size*val_check_interval = n images
+  optim:
+    # SGD
+    params:
+      lr: 0.01
+      momentum: 0.9
+      weight_decay: 0.0001
+  scheduler:
+    # MultiStepLR
+    params:
+      gamma: 0.5
+      milestones: [40, 80, 120, 130, 140, 150]
+  partitionings:
+    ptype: default
+    shortnames: [coarse, middle, fine]
+    files:
+      - resources/s2_cells/cells_0_12_images.csv
+      - resources/s2_cells/cells_0_6_images.csv
+      - resources/s2_cells/cells_0_3_images.csv
+  train_dir: resources/images/train_streetview
+  val_dir: resources/images/test_streetview
+  train_label_mapping: resources/train_streetview_labels.json
+  val_label_mapping: resources/test_streetview_labels.json
+  num_workers_per_loader: 6
+trainer_params:
+  gpus: 1
+  max_epochs: 60
+  distributed_backend: null
+  precision: 16
+  reload_dataloaders_every_epoch: true # necessary to shuffle IterableDataset
+

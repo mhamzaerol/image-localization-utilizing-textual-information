@@ -6,8 +6,10 @@ import torch
 import pytorch_lightning as pl
 import pandas as pd
 
+
 from classification.train_base import MultiPartitioningClassifier
-from classification.dataset import FiveCropImageDataset
+import torchvision
+from classification.dataset import StreetViewDataset
 
 
 def parse_args():
@@ -25,23 +27,21 @@ def parse_args():
         default=Path("models/base_M/hparams.yaml"),
         help="Path to hparams file (*.yaml) generated during training",
     )
-    # testsets
     args.add_argument(
-        "--image_dirs",
-        nargs="+",
-        default=["resources/images/im2gps", "resources/images/im2gps3k"],
+        "--image_dir",
+        required=True,
         help="Whitespace separated list of image folders to evaluate",
     )
     args.add_argument(
-        "--meta_files",
-        nargs="+",
-        default=[
-            "resources/images/im2gps_places365.csv",
-            "resources/images/im2gps3k_places365.csv",
-        ],
-        help="Whitespace separated list of respective meta data (ground-truth GPS positions). Required columns: 'IMG_ID,LAT,LON' or 'img_id, latitude, longitude'",
+        "--ocr_json_dir",
     )
-    # environment
+    args.add_argument(
+        "--ocr_feat_dir",
+    )
+    args.add_argument(
+        "--label_dir",
+        required=True,
+    )
     args.add_argument(
         "--gpu",
         action="store_true",
@@ -71,31 +71,49 @@ model = MultiPartitioningClassifier.load_from_checkpoint(
     map_location=None,
 )
 
+hparams = model.hparams
+
 if args.gpu and torch.cuda.is_available():
     args.gpu = 1
 else:
     args.gpu = None
 trainer = pl.Trainer(gpus=args.gpu, precision=args.precision)
 
-print("Init Testsets")
-dataloader = []
-for image_dir, meta_csv in zip(args.image_dirs, args.meta_files):
-    dataset = FiveCropImageDataset(meta_csv, image_dir)
-    dataloader.append(
-        torch.utils.data.DataLoader(
-            dataset,
-            batch_size=ceil(args.batch_size / 5),
-            shuffle=False,
-            num_workers=args.num_workers,
-        )
-    )
+print("Init Testset")
+
+tfm = torchvision.transforms.Compose(
+    [
+        torchvision.transforms.Resize(256),
+        torchvision.transforms.CenterCrop(224),
+        torchvision.transforms.ToTensor(),
+        torchvision.transforms.Normalize(
+            (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
+        ),
+    ]
+)
+
+dataset = StreetViewDataset(
+    data_path=args.image_dir,
+    ocr_json_path=args.ocr_json_dir,
+    ocr_feat_path=args.ocr_feat_dir,
+    label_path=args.label_dir,
+    use_ocr=hparams.ocr_params['use_ocr'],
+    shuffle=False,
+    transformation=tfm,
+    give_latlng=True,
+)
+dataloader = [torch.utils.data.DataLoader(
+    dataset,
+    batch_size=hparams.batch_size,
+    shuffle=False,
+    num_workers=args.num_workers,
+)]
+
 print("Testing")
 r = trainer.test(model, test_dataloaders=dataloader, verbose=False)
 # formatting results
 dfs = []
-if len(args.image_dirs) > 1:
-    r = r[0].values()
-for results, name in zip(r, [Path(x).stem for x in args.image_dirs]):
+for results, name in zip(r, [Path(args.image_dir).stem]):
     df = pd.DataFrame(results).T
     df["dataset"] = name
     df["partitioning"] = df.index
@@ -107,6 +125,6 @@ df = pd.concat(dfs)
 
 print(df)
 fout = Path(args.checkpoint).parent / ("test-" + "_".join(
-    [str(Path(x).stem) for x in args.image_dirs]) + ".csv")
+    [str(Path(args.image_dir).stem)]) + ".csv")
 print("Write to", fout)
 df.to_csv(fout)
